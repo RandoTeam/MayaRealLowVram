@@ -198,7 +198,7 @@ def main():
     parser.add_argument(
         "--with-dflash",
         action="store_true",
-        help="Также скачать DFlash2 драфтер (~697 MB) для ускоренного спекулятивного декодинга (+19-44% FPS на RTX 30+)"
+        help="Также скачать DFlash2 драфтер (~697 MB) для ускоренного спекулятивного декодинга (+19-44%% FPS на RTX 30+)"
     )
 
     args = parser.parse_args()
