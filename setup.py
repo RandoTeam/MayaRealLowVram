@@ -291,10 +291,9 @@ def find_vcvars(cuda=True):
     vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"
     if not vswhere.exists():
         return None
-    # CUDA 13 accepts Visual Studio 2019 and 2022 only: a newer one (2026 = version 18) installed next to them
-    # must not be picked ("unsupported Microsoft Visual Studio version"); with only a newer one there is none.
-    # ROCm's clang (the HIP build: cuda=False) takes a newer one too, 2019/2022 first
-    for versions in ([["-version", "[16.0,18.0)"]] if cuda else [["-version", "[16.0,18.0)"], []]):
+    # VS 2019 (16.x) and VS 2022 (17.x) first; if none found, allow VS 2026 (18.x) as fallback
+    version_trials = [["-version", "[16.0,18.0)"], ["-version", "[18.0,19.0)"]] if cuda else [["-version", "[16.0,18.0)"], []]
+    for versions in version_trials:
         p = out([str(vswhere), "-latest", "-products", "*", *versions, "-requires",
                  "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"]).strip()
         v = Path(p) / "VC/Auxiliary/Build/vcvars64.bat" if p else None
