@@ -309,6 +309,8 @@ def main():
         print(f"  Куда: {dst}")
         print(f"  URL:  {url}")
 
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
         # Проверка, скачан ли файл уже полностью
         if dst.exists() and dst.stat().st_size > 0:
             existing_size = dst.stat().st_size
