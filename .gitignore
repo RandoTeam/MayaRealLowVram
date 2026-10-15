@@ -52,3 +52,44 @@ build-vision.bat
 *.done
 /third_party/*.zip
 vision-memory.json
+
+# IDEs & Editors
+.vscode/
+.idea/
+.vs/
+*.swp
+*~
+*.sublime-project
+*.sublime-workspace
+
+# MSVC & C++ compiler intermediates
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.suo
+*.user
+*.ncb
+
+# Python environments & packaging
+venv/
+env/
+ENV/
+.env
+*.egg-info/
+.eggs/
+
+# OS-specific metadata
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+
+# Local configuration, runtime calibration & temporary files
+calibration.json
+cpu-cal.txt
+*.shared-settings.json
+*.local.json
+*.tmp
+*.bak
+
