@@ -1,0 +1,46 @@
+{
+ "exe": "C:\\AI\\MayaRealLowVram\\build\\strata.exe",
+ "args": [
+  "--glm-pack",
+  "C:\\AI\\Maya-data\\models\\Maya-S24\\pack",
+  "--max-context",
+  "32768",
+  "--prefill",
+  "auto",
+  "--kv-streaming",
+  "on",
+  "--expert-profile",
+  "C:\\AI\\MayaRealLowVram\\data\\expert-profile-glm.bin"
+ ],
+ "cwd": "C:\\AI\\MayaRealLowVram",
+ "tokenizer": "C:\\AI\\Maya-data\\models\\Maya-S24\\pack\\tokenizer",
+ "model_name": "glm-5.3-flash",
+ "gpu": [
+  0
+ ],
+ "sampling": {
+  "temperature": 1.0,
+  "top_p": 0.95
+ },
+ "reasoning_effort": "high",
+ "lib_dirs": [
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8\\bin"
+ ],
+ "port": 8080,
+ "log": "C:\\AI\\MayaRealLowVram\\maya-maya-s24.log",
+ "installer": {
+  "models_dir": "C:\\AI\\Maya-data\\models",
+  "quant": "Maya-S24",
+  "draft": "mtp",
+  "note": "Reference configuration for 4GB VRAM (RTX 3050 Laptop / Desktop) with full 32768 context window and 2-pass hybrid dense allocation"
+ },
+ "env": {
+  "STRATA_GLM_DENSE_VRAM_MB": "2100",
+  "STRATA_GLM_RESERVE_MB": "128",
+  "STRATA_GLM_DISK_SKIP_W": "0.15",
+  "STRATA_GLM_DISK_SKIP_FROM": "3",
+  "STRATA_GLM_PCIE_SHARE": "0.0",
+  "STRATA_GLM_KDA_GRAPH": "1",
+  "STRATA_GLM_CPU_SPLIT": "8"
+ }
+}

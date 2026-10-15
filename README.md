@@ -96,6 +96,10 @@ python download_model.py --model Maya-S24 --with-dflash
 
 ## 🛠 Запуск и сборка
 
+> 📖 **Пошаговое руководство по чистой установке и восстановлению:**  
+> Исчерпывающая пошаговая инструкция по установке всех зависимостей (MSVC, CUDA, Python, Git), настройке файла подкачки, первой сборке и развертыванию на чистой ОС Windows приведена в документе **[`docs/FRESH_OS_RESTORATION_GUIDE.md`](docs/FRESH_OS_RESTORATION_GUIDE.md)**.  
+> Готовый эталонный конфигурационный файл: **[`configs/maya-s24-lowvram-4gb.example.json`](configs/maya-s24-lowvram-4gb.example.json)**.
+
 1. Убедитесь, что установлен компилятор C++ и CUDA Toolkit (CUDA 12.0+ / 12.8):
    ```bat
    python maya.py --check
@@ -104,7 +108,11 @@ python download_model.py --model Maya-S24 --with-dflash
    ```bat
    START-MAYA.bat
    ```
-3. Откройте веб-интерфейс в браузере: `http://127.0.0.1:8080`.
+3. Скопируйте эталонный конфиг с калиброванными Low-VRAM переменными:
+   ```bat
+   copy configs\maya-s24-lowvram-4gb.example.json maya-maya-s24.json
+   ```
+4. Откройте веб-интерфейс в браузере: `http://127.0.0.1:8080`.
 
 ---
 
