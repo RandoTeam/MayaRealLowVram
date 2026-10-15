@@ -234,6 +234,10 @@ private:
     float* w_arena_ = nullptr;
     uint64_t w_arena_bytes_ = 0;                           // (the VRAM report at load)
     bool w_arena_is_host_ = false;
+    void* w_arena_vram_ = nullptr;
+    uint64_t w_arena_vram_bytes_ = 0;
+    void* w_arena_host_ = nullptr;
+    uint64_t w_arena_host_bytes_ = 0;
     // state and scratch arenas (device), carved in load(); see glm_model.cpp for the layout
     float* state_ = nullptr;
     uint64_t state_bytes_ = 0;

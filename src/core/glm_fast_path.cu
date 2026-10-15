@@ -956,11 +956,11 @@ bool Glm5Model::fast_setup(std::string& err) {
         cudaMemGetInfo(&free_b, &total_b);
         {
             const double G = 1073741824.0, used = (double) (total_b - free_b);
-            const double known = (double) ((w_arena_is_host_ ? 0 : w_arena_bytes_) + state_bytes_ + sc_bytes_ + F->arena_bytes + 8 * sstride);
-            std::fprintf(stderr, "glm fast: CUDA%d VRAM before the expert pool: %.2f of %.2f GB in use - dense weights %.2f%s, "
+            const double known = (double) (w_arena_vram_bytes_ + state_bytes_ + sc_bytes_ + F->arena_bytes + 8 * sstride);
+            std::fprintf(stderr, "glm fast: CUDA%d VRAM before the expert pool: %.2f of %.2f GB in use - dense weights %.2f GB (%.2f GB VRAM, %.2f GB host RAM), "
                                  "state/KV (%lld ctx) %.2f, activations %.2f, other (context, MTP, scratch, prompt path) "
                                  "%.2f\n", dev_, used / G, (double) total_b / G, (double) w_arena_bytes_ / G,
-                         w_arena_is_host_ ? " (in host RAM)" : "",
+                         (double) w_arena_vram_bytes_ / G, (double) w_arena_host_bytes_ / G,
                          (long long) max_ctx_, (double) state_bytes_ / G,
                          (double) (sc_bytes_ + F->arena_bytes + 8 * sstride) / G, (used - known) / G);
         }
