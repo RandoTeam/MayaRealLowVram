@@ -233,6 +233,7 @@ private:
     std::map<std::string, const float*> w_;       // name -> device pointer (the weights arena)
     float* w_arena_ = nullptr;
     uint64_t w_arena_bytes_ = 0;                           // (the VRAM report at load)
+    bool w_arena_is_host_ = false;
     // state and scratch arenas (device), carved in load(); see glm_model.cpp for the layout
     float* state_ = nullptr;
     uint64_t state_bytes_ = 0;
@@ -522,6 +523,7 @@ public:
     int mtp_src_ = -1;                                     // the shard of STRATA_GLM_MTP_GGUF's block, -1: the model's
     int lt_ = 0;                                           // the tier layers: [l0_, lt_) = the trunk's + the draft's
     void* mtp_arena_ = nullptr;
+    bool mtp_arena_is_host_ = false;
     bool load_mtp(const std::vector<std::unique_ptr<strata::GgufFile>>& gfs, std::string& err);
     // the draft block at position p -> mtp_tok[step] (see glm_fast_path.cu: the chained drafts and the draft head)
     bool fast_mtp(int64_t p, int32_t next_tok, std::string& err, int step = 0, bool sub = false, bool read_back = true);

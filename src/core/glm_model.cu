@@ -637,8 +637,14 @@ Glm5Model::~Glm5Model() {
         cudaSetDevice(dev_);
     }
     if (d_tok_) cudaFree(d_tok_);
-    if (w_arena_) cudaFree(w_arena_);
-    if (mtp_arena_) cudaFree(mtp_arena_);
+    if (w_arena_) {
+        if (w_arena_is_host_) cudaFreeHost(w_arena_);
+        else cudaFree(w_arena_);
+    }
+    if (mtp_arena_) {
+        if (mtp_arena_is_host_) cudaFreeHost(mtp_arena_);
+        else cudaFree(mtp_arena_);
+    }
     kv_stream_free(kv_);
     if (state_) cudaFree(state_);
     if (sc_) cudaFree(sc_);
@@ -2854,7 +2860,25 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
         for (auto& e : v) s += " | " + e.second + " " + std::to_string((int) (e.first >> 20)) + " MB";
         std::fprintf(stderr, "glm pack: CUDA%d dense weights %.2f GB:%s\n", dev_, (double) bytes / 1073741824.0, s.c_str());
     }
-    { cudaError_t e_ = cudaMalloc(&w_arena_, bytes); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
+    size_t free_dev = 0, total_dev = 0;
+    cudaMemGetInfo(&free_dev, &total_dev);
+    bool use_host_dense = false;
+    if (total_dev < (size_t) 7500 * 1024 * 1024 || getenv("STRATA_GLM_DENSE_HOST") != nullptr || getenv("STRATA_GLM_LOW_VRAM") != nullptr) {
+        use_host_dense = true;
+    }
+    if (const char* dh = getenv("STRATA_GLM_DENSE_HOST")) {
+        if (std::atoi(dh) == 0) use_host_dense = false;
+    }
+    w_arena_is_host_ = use_host_dense;
+    if (w_arena_is_host_) {
+        cudaError_t e_ = cudaHostAlloc(&w_arena_, bytes, cudaHostAllocMapped | cudaHostAllocPortable);
+        if (e_ != cudaSuccess) { err = std::string("pack host alloc: ") + cudaGetErrorString(e_); return false; }
+        std::fprintf(stderr, "glm pack: CUDA%d low-VRAM mode: allocated %.2f GB dense weights in pinned host memory (Zero-Copy UVA)\n",
+                     dev_, (double) bytes / 1073741824.0);
+    } else {
+        cudaError_t e_ = cudaMalloc(&w_arena_, bytes);
+        if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; }
+    }
     w_arena_bytes_ = bytes;
     std::ifstream dense(pack_dir + "/dense.bin", std::ios::binary);
     if (!dense) {
@@ -2879,7 +2903,12 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
                     return false;
                 }
                 dst[j] = (uint8_t*) w_arena_ + at;
-                { cudaError_t e_ = cudaMemcpy(dst[j], sh.base + src[j], (size_t) nb[j], cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
+                if (w_arena_is_host_) {
+                    std::memcpy(dst[j], sh.base + src[j], (size_t) nb[j]);
+                } else {
+                    cudaError_t e_ = cudaMemcpy(dst[j], sh.base + src[j], (size_t) nb[j], cudaMemcpyHostToDevice);
+                    if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; }
+                }
                 at += (nb[j] + 255u) & ~(uint64_t) 255u;
             }
             x3::Mat M;
@@ -2934,7 +2963,12 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
                 err = "pack: short read on dense.bin for " + r.name;
                 return false;
             }
-            { cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, raw.data(), (size_t) r.bytes, cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
+            if (w_arena_is_host_) {
+                std::memcpy((uint8_t*) w_arena_ + at, raw.data(), (size_t) r.bytes);
+            } else {
+                cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, raw.data(), (size_t) r.bytes, cudaMemcpyHostToDevice);
+                if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; }
+            }
             w16_[r.name] = (const uint16_t*) ((uint8_t*) w_arena_ + at);
             at += (r.bytes + 255u) & ~(uint64_t) 255u;
             continue;
@@ -2950,7 +2984,12 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
             const size_t nbytes = strata::kernels::native_mmvq_weight_bytes(ti->type, (int) ti->shape[0],
                                                                             (int) ti->shape[1]);
             const uint8_t* src = pack_shards_[(size_t) si].base + gfs[(size_t) si]->data_start() + ti->offset;
-            { cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, src, nbytes, cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
+            if (w_arena_is_host_) {
+                std::memcpy((uint8_t*) w_arena_ + at, src, nbytes);
+            } else {
+                cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, src, nbytes, cudaMemcpyHostToDevice);
+                if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; }
+            }
             ws_map_[r.name] = strata::core::WSlot{nullptr, (int) ti->type, (const void*) ((uint8_t*) w_arena_ + at),
                                     (int64_t) ti->shape[0], (int64_t) ti->shape[1]};
             if (r.name == "token_embd.weight") {
@@ -3007,8 +3046,13 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
             err = "pack: unsupported dense kind '" + r.kind + "' for " + r.name;
             return false;
         }
-        { cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, host.data(), (size_t) n_f32 * 4,
-                            cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
+        if (w_arena_is_host_) {
+            std::memcpy((uint8_t*) w_arena_ + at, host.data(), (size_t) n_f32 * 4);
+        } else {
+            cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, host.data(), (size_t) n_f32 * 4,
+                                        cudaMemcpyHostToDevice);
+            if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; }
+        }
         w_[r.name] = (const float*) ((uint8_t*) w_arena_ + at);
         ws_map_[r.name] = strata::core::WSlot{(const float*) ((uint8_t*) w_arena_ + at), 0, nullptr, 0, 0};
         at += (n_f32 * 4 + 255u) & ~(uint64_t) 255u;
@@ -3379,10 +3423,19 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
     } else if (!mtp_dense_vram([&](const std::string& n) { return find(n, si); }, il, bytes, err)) {
         return false;
     }
-    if (cudaMalloc(&mtp_arena_, bytes) != cudaSuccess) {
-        cudaGetLastError();
-        err = "mtp: the draft block's weights (" + std::to_string(bytes >> 20) + " MB) did not allocate";
-        return false;
+    mtp_arena_is_host_ = w_arena_is_host_;
+    if (mtp_arena_is_host_) {
+        if (cudaHostAlloc(&mtp_arena_, bytes, cudaHostAllocMapped | cudaHostAllocPortable) != cudaSuccess) {
+            cudaGetLastError();
+            err = "mtp: the draft block's weights (" + std::to_string(bytes >> 20) + " MB) did not allocate in host memory";
+            return false;
+        }
+    } else {
+        if (cudaMalloc(&mtp_arena_, bytes) != cudaSuccess) {
+            cudaGetLastError();
+            err = "mtp: the draft block's weights (" + std::to_string(bytes >> 20) + " MB) did not allocate";
+            return false;
+        }
     }
     uint64_t at = 0;
     uint8_t* base = (uint8_t*) mtp_arena_;
@@ -3408,9 +3461,13 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
         for (int j = 0; j < 3; ++j) {
             if (src[j] + nb[j] > sh.size) { err = "mtp: EXL3 " + n + " lies past the end of its file"; return false; }
             dst[j] = base + at;
-            if (cudaMemcpy(dst[j], sh.base + src[j], (size_t) nb[j], cudaMemcpyHostToDevice) != cudaSuccess) {
-                err = "mtp: upload";
-                return false;
+            if (mtp_arena_is_host_) {
+                std::memcpy(dst[j], sh.base + src[j], (size_t) nb[j]);
+            } else {
+                if (cudaMemcpy(dst[j], sh.base + src[j], (size_t) nb[j], cudaMemcpyHostToDevice) != cudaSuccess) {
+                    err = "mtp: upload";
+                    return false;
+                }
             }
             at += (nb[j] + 255u) & ~(uint64_t) 255u;
         }
@@ -3434,7 +3491,11 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
         }
         const strata::TensorInfo* t = find(P + n, si);
         const size_t nb = strata::kernels::native_mmvq_weight_bytes(t->type, (int) t->shape[0], (int) t->shape[1]);
-        if (cudaMemcpy(base + at, src_of(t, si), nb, cudaMemcpyHostToDevice) != cudaSuccess) { err = "mtp: upload"; return false; }
+        if (mtp_arena_is_host_) {
+            std::memcpy(base + at, src_of(t, si), nb);
+        } else {
+            if (cudaMemcpy(base + at, src_of(t, si), nb, cudaMemcpyHostToDevice) != cudaSuccess) { err = "mtp: upload"; return false; }
+        }
         ws_map_[P + n] = strata::core::WSlot{nullptr, (int) t->type, (const void*) (base + at), (int64_t) t->shape[0],
                                              (int64_t) t->shape[1]};
         at += (nb + 255u) & ~(uint64_t) 255u;
@@ -3454,14 +3515,22 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
             u += 0x7fffu + ((u >> 16) & 1u);
             b16[i] = (uint16_t) (u >> 16);
         }
-        if (cudaMemcpy(base + at, b16.data(), b16.size() * 2, cudaMemcpyHostToDevice) != cudaSuccess) { err = "mtp: upload"; return false; }
+        if (mtp_arena_is_host_) {
+            std::memcpy(base + at, b16.data(), b16.size() * 2);
+        } else {
+            if (cudaMemcpy(base + at, b16.data(), b16.size() * 2, cudaMemcpyHostToDevice) != cudaSuccess) { err = "mtp: upload"; return false; }
+        }
         w16_[P + n] = (const uint16_t*) (base + at);
         at += ((uint64_t) b16.size() * 2 + 255u) & ~(uint64_t) 255u;
     }
     for (const char* n : f32_names) {
         const strata::TensorInfo* t = find(P + n, si);
         if (!to_host(t, si)) return false;
-        if (cudaMemcpy(base + at, host.data(), host.size() * 4, cudaMemcpyHostToDevice) != cudaSuccess) { err = "mtp: upload"; return false; }
+        if (mtp_arena_is_host_) {
+            std::memcpy(base + at, host.data(), host.size() * 4);
+        } else {
+            if (cudaMemcpy(base + at, host.data(), host.size() * 4, cudaMemcpyHostToDevice) != cudaSuccess) { err = "mtp: upload"; return false; }
+        }
         w_[P + n] = (const float*) (base + at);
         ws_map_[P + n] = strata::core::WSlot{(const float*) (base + at), 0, nullptr, 0, 0};
         at += ((uint64_t) host.size() * 4 + 255u) & ~(uint64_t) 255u;

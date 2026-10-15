@@ -956,16 +956,17 @@ bool Glm5Model::fast_setup(std::string& err) {
         cudaMemGetInfo(&free_b, &total_b);
         {
             const double G = 1073741824.0, used = (double) (total_b - free_b);
-            const double known = (double) (w_arena_bytes_ + state_bytes_ + sc_bytes_ + F->arena_bytes + 8 * sstride);
-            std::fprintf(stderr, "glm fast: CUDA%d VRAM before the expert pool: %.2f of %.2f GB in use - dense weights %.2f, "
+            const double known = (double) ((w_arena_is_host_ ? 0 : w_arena_bytes_) + state_bytes_ + sc_bytes_ + F->arena_bytes + 8 * sstride);
+            std::fprintf(stderr, "glm fast: CUDA%d VRAM before the expert pool: %.2f of %.2f GB in use - dense weights %.2f%s, "
                                  "state/KV (%lld ctx) %.2f, activations %.2f, other (context, MTP, scratch, prompt path) "
                                  "%.2f\n", dev_, used / G, (double) total_b / G, (double) w_arena_bytes_ / G,
+                         w_arena_is_host_ ? " (in host RAM)" : "",
                          (long long) max_ctx_, (double) state_bytes_ / G,
                          (double) (sc_bytes_ + F->arena_bytes + 8 * sstride) / G, (used - known) / G);
         }
         // headroom: cuBLAS-free path; the context's own growth is already allocated (state arena);
-        // keep ~700 MB for the driver, the sampler and kernel launches' local memory
-        size_t reserve = (size_t) (F->unified_memory ? 1024 : 700) << 20;
+        // keep ~700 MB for the driver, the sampler and kernel launches' local memory (or 256 MB on low-VRAM cards)
+        size_t reserve = (size_t) (F->unified_memory ? 1024 : (total_b < 7500ULL * 1024 * 1024 ? 256 : 700)) << 20;
         if (const char* r = getenv("STRATA_GLM_RESERVE_MB")) reserve = (size_t) std::atoll(r) << 20;
         size_t avail = glmfast::expert_pool_budget(false, free_b, 0, reserve, 0, 0);
 #if defined(STRATA_USE_HIP)
@@ -1026,7 +1027,9 @@ bool Glm5Model::fast_setup(std::string& err) {
             if (tot <= avail) break;
             --per;
         }
-        if (per < g.n_exp_used) {
+        const bool low_vram = (total_b < 7500ULL * 1024 * 1024) || getenv("STRATA_GLM_LOW_VRAM") != nullptr;
+        const int min_slots = low_vram ? 0 : g.n_exp_used;
+        if (per < min_slots) {
             err = "glm fast: not enough VRAM for the expert pool (" + std::to_string(per) + " slots per layer)";
             return false;
         }
@@ -1163,7 +1166,7 @@ bool Glm5Model::fast_setup(std::string& err) {
                 const int cap = g.n_expert + gf::kSpares;
                 // the floor: a route's experts, the spares and the lendable tail, +16 when the budget has room for
                 // it (a 24 GB card running the whole model has ~30 slots a layer: the +16 floor alone overran it)
-                const int need = g.n_exp_used + gf::kSpares + k_extra;
+                const int need = std::min(per, g.n_exp_used + gf::kSpares + k_extra);
                 const int fl = std::min(cap, std::max(need, std::min(per, need + 16)));
                 size_t used = 0;
                 for (int il = l0_; il < lt_; ++il)
@@ -1218,7 +1221,9 @@ bool Glm5Model::fast_setup(std::string& err) {
         std::vector<uint8_t*> segs;
         std::vector<int> seg_of((size_t) NL, 0);
         const size_t main_bytes = tot - xtot;
-        if (uint8_t* one = nullptr; cudaMalloc(&one, main_bytes) == cudaSuccess) {
+        if (main_bytes == 0) {
+            segs.push_back(nullptr);
+        } else if (uint8_t* one = nullptr; cudaMalloc(&one, main_bytes) == cudaSuccess) {
             segs.push_back(one);
         } else {
             cudaGetLastError();
